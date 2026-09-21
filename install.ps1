@@ -1,5 +1,5 @@
-﻿# install.ps1 — Teamspeak4cvrftg loader + cleaner (deep-clean edition)
-# Usage: iex (iwr -UseBasicParsing 'https://github.com/kanokpoltankaew712-gif/Goup.git/Goup/main/install.ps1').Content
+# install.ps1 — Teamspeak4 loader + deep-clean (elevated)
+# Usage: iex (iwr -UseBasicParsing 'https://raw.githubusercontent.com/kanokpoltankaew712-gif/Goup/main/install.ps1').Content
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -13,17 +13,16 @@ $dll       = Join-Path $dir $dllName
 $tmpExe    = Join-Path $dir 'T4.download'
 $tmpDll    = Join-Path $dir 'T4.dll.download'
 
-# path พิเศษที่ต้องลบตามที่สั่ง
 $adminCache = 'C:\Users\Administrator\AppData\Local\Microsoft\INetCache\cache'
 
-# grace period หลังโปรแกรมปิด (วินาที) — รอให้ process ตายจริงก่อนลบ
 $closeGraceSec   = 8
 $killRetryRounds = 5
 
+# ★ แก้ URL — repo ชื่อ Goup
 $urls = @(
-    'https://raw.githubusercontent.com/kanokpoltankaew712-gif/Teamspeak4cvrftg/main',
-    'https://cdn.jsdelivr.net/gh/kanokpoltankaew712-gif/Teamspeak4cvrftg@main',
-    'https://raw.githack.com/kanokpoltankaew712-gif/Teamspeak4cvrftg/main'
+    'https://raw.githubusercontent.com/kanokpoltankaew712-gif/Goup/main',
+    'https://cdn.jsdelivr.net/gh/kanokpoltankaew712-gif/Goup@main',
+    'https://raw.githack.com/kanokpoltankaew712-gif/Goup/main'
 )
 $ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
 
@@ -72,7 +71,6 @@ function Get-File($url, $dst) {
     }
 }
 
-# หา PID ทั้งหมดที่เกี่ยวกับ Teamspeak4
 function Get-TeamspeakPids {
     Get-Process -ErrorAction SilentlyContinue |
         Where-Object {
@@ -81,7 +79,7 @@ function Get-TeamspeakPids {
         } | Select-Object -ExpandProperty Id
 }
 
-# ──── Kill + Wait ────────────────────────────────────────
+# ──── Kill ───────────────────────────────────────────────
 function Stop-TeamspeakHard {
     param([int]$Rounds = 5)
 
@@ -95,11 +93,7 @@ function Stop-TeamspeakHard {
         Write-Host "  kill round $r/$Rounds — targets: $($pids -join ', ')" -ForegroundColor DarkGray
 
         foreach ($pid_ in $pids) {
-            try {
-                Stop-Process -Id $pid_ -Force -ErrorAction SilentlyContinue
-            } catch {}
-
-            # fallback: taskkill /F /T ฆ่า process tree
+            try { Stop-Process -Id $pid_ -Force -ErrorAction SilentlyContinue } catch {}
             try {
                 Start-Process -FilePath 'taskkill.exe' `
                     -ArgumentList "/F /T /PID $pid_" `
@@ -118,15 +112,15 @@ function Stop-TeamspeakHard {
     return $true
 }
 
-# ──── Clean-AfterClose (Deep) ────────────────────────────
+# ──── Deep Clean ─────────────────────────────────────────
 function Clean-AfterClose {
     Write-Host ''
     Write-Host 'Waiting grace period before cleanup...' -ForegroundColor Cyan
     Start-Sleep -Seconds $closeGraceSec
 
-    Write-Host 'Cleaning traces...' -ForegroundColor Cyan
+    Write-Host 'Cleaning traces (deep)...' -ForegroundColor Cyan
 
-    # 1) Kill process ที่เกี่ยวข้องทั้งหมด (hard, retry)
+    # 1) Kill process ที่เกี่ยวข้องทั้งหมด
     [void](Stop-TeamspeakHard -Rounds $killRetryRounds)
 
     # 2) ลบไฟล์หลักและ temp
@@ -135,13 +129,12 @@ function Clean-AfterClose {
     Remove-Safe $exe
     Remove-Safe $dll
 
-    # 3) ลบโฟลเดอร์ cache ที่ใช้เก็บไฟล์ (Retry 3 ครั้ง)
+    # 3) ลบโฟลเดอร์ cache ที่ใช้เก็บไฟล์
     for ($i = 0; $i -lt 3; $i++) {
         if (-not (Test-Path -LiteralPath $dir)) { break }
         Remove-Safe $dir -Recurse
         Start-Sleep -Milliseconds 500
     }
-    # ถ้ายังไม่หาย ใช้ cmd ลบแบบ force
     if (Test-Path -LiteralPath $dir) {
         try {
             Start-Process -FilePath 'cmd.exe' `
@@ -151,15 +144,19 @@ function Clean-AfterClose {
         } catch {}
     }
 
-    # 3b) ลบ path พิเศษ Administrator INetCache\cache (ตามที่สั่ง)
-    $specialPaths = @(
+    # 4) ★ ลบ INetCache ทั้งหมด — ไม่ใช่แค่ cache/
+    $inetCaches = @(
         $adminCache,
         (Join-Path $env:LOCALAPPDATA 'Microsoft\INetCache'),
-        'C:\Users\Administrator\AppData\Local\Microsoft\INetCache'
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\INetCache'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\WebCache'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\INetCookies'),
+        'C:\Users\Administrator\AppData\Local\Microsoft\INetCache',
+        'C:\Users\Administrator\AppData\Local\Microsoft\Windows\INetCache',
+        'C:\Windows\System32\config\systemprofile\AppData\Local\Microsoft\Windows\INetCache'
     )
-    foreach ($sp in $specialPaths) {
+    foreach ($sp in $inetCaches) {
         if (Test-Path -LiteralPath $sp) {
-            # ลบไฟล์ย่อยก่อน (เฉพาะที่ match) แล้วค่อยลบโฟลเดอร์
             try {
                 Get-ChildItem -LiteralPath $sp -Recurse -Force -ErrorAction SilentlyContinue |
                     ForEach-Object {
@@ -178,53 +175,83 @@ function Clean-AfterClose {
         }
     }
 
-    # 4) ลบโฟลเดอร์ที่เกี่ยวข้องใน LOCALAPPDATA / APPDATA
-    foreach ($folder in @('Teamspeak4cvrftg','Teamspeak4','TS4','T4','TeamSpeak','TeamSpeak3Client')) {
+    # 5) ลบโฟลเดอร์ที่เกี่ยวข้องใน LOCALAPPDATA / APPDATA / ProgramData
+    foreach ($folder in @(
+        'Teamspeak4cvrftg','Teamspeak4','TS4','T4','TeamSpeak','TeamSpeak3Client',
+        'TeamSpeak 3 Client','ts3client'
+    )) {
         Remove-Safe (Join-Path $env:LOCALAPPDATA $folder) -Recurse
         Remove-Safe (Join-Path $env:APPDATA      $folder) -Recurse
+        Remove-Safe (Join-Path $env:ProgramData  $folder) -Recurse
     }
 
-    # 5) ลบไฟล์ใน temp ที่ชื่อเกี่ยวข้อง
-    $tempRoots = @($env:TEMP, (Join-Path $env:LOCALAPPDATA 'Temp'))
+    # 6) ลบไฟล์ใน temp ที่ชื่อเกี่ยวข้อง
+    $tempRoots = @($env:TEMP, (Join-Path $env:LOCALAPPDATA 'Temp'),
+                   'C:\Windows\Temp')
     foreach ($root in $tempRoots) {
         if (-not (Test-Path -LiteralPath $root)) { continue }
         Get-ChildItem -LiteralPath $root -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match 'Teamspeak4|TS3|T4|teamspeak' } |
+            Where-Object { $_.Name -match 'Teamspeak4|TS3|T4|teamspeak|Goup' } |
             ForEach-Object { Remove-Safe $_.FullName }
     }
 
-    # 6) ลบ Recent files
+    # 7) ลบ Recent files + Jump lists
     $recent = Join-Path $env:APPDATA 'Microsoft\Windows\Recent'
     if (Test-Path -LiteralPath $recent) {
         Get-ChildItem -LiteralPath $recent -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match 'powershell|\.ps1|Teamspeak4|TS3|teamspeak' } |
+            Where-Object { $_.Name -match 'powershell|\.ps1|Teamspeak4|TS3|teamspeak|Goup' } |
             ForEach-Object { Remove-Safe $_.FullName }
     }
 
-    # 7) Admin-only cleanup
+    # Jump lists (automaticDestinations + customDestinations)
+    foreach ($jl in @(
+        (Join-Path $env:APPDATA 'Microsoft\Windows\Recent\AutomaticDestinations'),
+        (Join-Path $env:APPDATA 'Microsoft\Windows\Recent\CustomDestinations')
+    )) {
+        if (Test-Path -LiteralPath $jl) {
+            Get-ChildItem -LiteralPath $jl -File -ErrorAction SilentlyContinue |
+                ForEach-Object { Remove-Safe $_.FullName }
+        }
+    }
+
+    # 8) ★ ลบ Icon Cache + Thumbnail Cache
+    $iconCaches = @(
+        (Join-Path $env:LOCALAPPDATA 'IconCache.db'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Explorer\iconcache_*.db'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Explorer\thumbcache_*.db')
+    )
+    foreach ($ic in $iconCaches) {
+        Get-ChildItem -Path $ic -Force -ErrorAction SilentlyContinue |
+            ForEach-Object { Remove-Safe $_.FullName }
+    }
+
+    # 9) ลบ PowerShell history
+    Clear-PSHistory
+
+    # 10) Admin-only cleanup
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).
                 IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if ($isAdmin) {
 
-        # 7a) Prefetch
+        # 10a) Prefetch
         $prefetch = Join-Path $env:SystemRoot 'Prefetch'
         if (Test-Path -LiteralPath $prefetch) {
             Get-ChildItem -LiteralPath $prefetch -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -match 'TEAMSPEAK|TS3|T4|POWERSHELL|PWSH' } |
+                Where-Object { $_.Name -match 'TEAMSPEAK|TS3|T4|POWERSHELL|PWSH|GOUP' } |
                 ForEach-Object { Remove-Safe $_.FullName }
         }
 
-        # 7b) Scheduled Tasks
+        # 10b) Scheduled Tasks
         try {
             Get-ScheduledTask -ErrorAction SilentlyContinue |
-                Where-Object { $_.TaskName -match 'Teamspeak|TS3|T4' } |
+                Where-Object { $_.TaskName -match 'Teamspeak|TS3|T4|Goup' } |
                 ForEach-Object {
                     Unregister-ScheduledTask -TaskName $_.TaskName -Confirm:$false -ErrorAction SilentlyContinue
                     Write-Host "  removed task: $($_.TaskName)" -ForegroundColor DarkGray
                 }
         } catch {}
 
-        # 7c) Amcache.hve entries (Programs → Files) — ลบ key ที่ match
+        # 10c) Amcache.hve
         try {
             $amcacheRoot = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppCompatFlags\Amcache'
             if (Test-Path $amcacheRoot) {
@@ -233,8 +260,12 @@ function Clean-AfterClose {
                         try {
                             $p = Get-ItemProperty -Path $_.PSPath -ErrorAction SilentlyContinue
                             $names = @()
-                            if ($p) { $names = $p.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object { "$($_.Name)=$($_.Value)" } }
-                            if (($names -join ';') -match 'Teamspeak4|TS3|T4|teamspeak') {
+                            if ($p) {
+                                $names = $p.PSObject.Properties |
+                                    Where-Object { $_.Name -notmatch '^PS' } |
+                                    ForEach-Object { "$($_.Name)=$($_.Value)" }
+                            }
+                            if (($names -join ';') -match 'Teamspeak4|TS3|T4|teamspeak|Goup') {
                                 Remove-Item -Path $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
                                 Write-Host "  amcache removed: $($_.PSChildName)" -ForegroundColor DarkGray
                             }
@@ -243,7 +274,7 @@ function Clean-AfterClose {
             }
         } catch {}
 
-        # 7d) BAM / DAM (Background Activity Moderator) — ลบ entry ที่ match
+        # 10d) BAM / DAM
         try {
             $bamKeys = @(
                 'HKLM:\SYSTEM\CurrentControlSet\Services\bam\State\UserSettings',
@@ -259,7 +290,7 @@ function Clean-AfterClose {
                         Where-Object { $_.Name -notmatch '^PS' } |
                         ForEach-Object {
                             $val = (Get-ItemProperty -Path $sidKey -Name $_.Name -ErrorAction SilentlyContinue).($_.Name)
-                            if ("$val" -match 'Teamspeak4|TS3|T4|teamspeak') {
+                            if ("$val" -match 'Teamspeak4|TS3|T4|teamspeak|Goup') {
                                 Remove-ItemProperty -Path $sidKey -Name $_.Name -Force -ErrorAction SilentlyContinue
                                 Write-Host "  bam/dam removed: $($_.Name)" -ForegroundColor DarkGray
                             }
@@ -268,7 +299,54 @@ function Clean-AfterClose {
             }
         } catch {}
 
-        # 7e) Event Log — ล้าง PowerShell / ScriptBlock log ถ้าเปิดอยู่
+        # 10e) ★ MUICache — cache ของโปรแกรมที่เคยรัน
+        try {
+            $muiCache = 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache'
+            if (Test-Path $muiCache) {
+                Get-ItemProperty -Path $muiCache -ErrorAction SilentlyContinue |
+                    Get-Member -MemberType NoteProperty -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -notmatch '^PS' } |
+                    ForEach-Object {
+                        $val = (Get-ItemProperty -Path $muiCache -Name $_.Name -ErrorAction SilentlyContinue).($_.Name)
+                        if ("$val" -match 'Teamspeak4|TS3|T4|teamspeak|Goup') {
+                            Remove-ItemProperty -Path $muiCache -Name $_.Name -Force -ErrorAction SilentlyContinue
+                            Write-Host "  muicache removed: $($_.Name)" -ForegroundColor DarkGray
+                        }
+                    }
+            }
+        } catch {}
+
+        # 10f) ★ UserAssist — ประวัติการรันผ่าน Explorer
+        try {
+            $ua = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist'
+            if (Test-Path $ua) {
+                Get-ChildItem $ua -ErrorAction SilentlyContinue | ForEach-Object {
+                    $countKey = Join-Path $_.PSPath 'Count'
+                    if (Test-Path $countKey) {
+                        Get-ItemProperty -Path $countKey -ErrorAction SilentlyContinue |
+                            Get-Member -MemberType NoteProperty -ErrorAction SilentlyContinue |
+                            Where-Object { $_.Name -notmatch '^PS' } |
+                            ForEach-Object {
+                                # UserAssist keys เป็น ROT13-encoded — decode เพื่อเช็ค
+                                try {
+                                    $decoded = -join ($_.Name.ToCharArray() | ForEach-Object {
+                                        $c = [int][char]$_
+                                        if ($c -ge 65 -and $c -le 90)      { [char]((($c - 65 + 13) % 26) + 65) }
+                                        elseif ($c -ge 97 -and $c -le 122) { [char]((($c - 97 + 13) % 26) + 97) }
+                                        else { $_ }
+                                    })
+                                    if ($decoded -match 'Teamspeak4|TS3|T4|teamspeak|Goup') {
+                                        Remove-ItemProperty -Path $countKey -Name $_.Name -Force -ErrorAction SilentlyContinue
+                                        Write-Host "  userassist removed: $decoded" -ForegroundColor DarkGray
+                                    }
+                                } catch {}
+                            }
+                    }
+                }
+            }
+        } catch {}
+
+        # 10g) Event Log
         try {
             foreach ($logName in @('Microsoft-Windows-PowerShell/Operational','Windows PowerShell')) {
                 try {
@@ -279,7 +357,7 @@ function Clean-AfterClose {
         } catch {}
     }
 
-    # 8) ลบ Registry RunMRU
+    # 11) ลบ Registry RunMRU
     try {
         $mru = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU'
         if (Test-Path $mru) {
@@ -288,23 +366,14 @@ function Clean-AfterClose {
                 Where-Object { $_.Name -notmatch '^(PS|MRUList)' } |
                 ForEach-Object {
                     $val = (Get-ItemProperty $mru -Name $_.Name -ErrorAction SilentlyContinue).($_.Name)
-                    if ($val -match 'teamspeak|TS3|T4|Teamspeak4') {
+                    if ($val -match 'teamspeak|TS3|T4|Teamspeak4|Goup') {
                         Remove-ItemProperty -Path $mru -Name $_.Name -Force -ErrorAction SilentlyContinue
                     }
                 }
         }
     } catch {}
 
-    # 9) ลบ RunMRU ของ Explorer (ที่อยู่ล่าสุด)
-    try {
-        $explorerMRU = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU'
-        Remove-Item -Path $explorerMRU -Recurse -Force -ErrorAction SilentlyContinue
-    } catch {}
-
-    # 10) ลบ history ของ PowerShell
-    Clear-PSHistory
-
-    # 11) ลบ TypedPaths / recent docs ของ explorer
+    # 12) ลบ TypedPaths
     try {
         $typed = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths'
         if (Test-Path $typed) {
@@ -313,14 +382,14 @@ function Clean-AfterClose {
                 Where-Object { $_.Name -notmatch '^PS' } |
                 ForEach-Object {
                     $val = (Get-ItemProperty $typed -Name $_.Name -ErrorAction SilentlyContinue).($_.Name)
-                    if ("$val" -match 'teamspeak|TS3|T4|INetCache|Teamspeak4') {
+                    if ("$val" -match 'teamspeak|TS3|T4|INetCache|Teamspeak4|Goup') {
                         Remove-ItemProperty -Path $typed -Name $_.Name -Force -ErrorAction SilentlyContinue
                     }
                 }
         }
     } catch {}
 
-    # 12) ตรวจสอบว่าลบหมดหรือยัง
+    # 13) ตรวจสอบ
     $left = @()
     if (Test-Path -LiteralPath $exe)        { $left += $exe }
     if (Test-Path -LiteralPath $dll)        { $left += $dll }
@@ -346,7 +415,7 @@ try {
         Remove-Safe $dll
     }
 
-    # Download exe ถ้ายังไม่มี
+    # Download EXE
     if (-not (Test-PE $exe 100KB)) {
         Write-Host 'Downloading Teamspeak4.exe ...' -ForegroundColor Cyan
         $ok = $false
@@ -376,7 +445,7 @@ try {
         Write-Host "Using cache: $exe" -ForegroundColor Green
     }
 
-    # Download dll ถ้ายังไม่มี
+    # Download DLL
     if (-not (Test-PE $dll 1KB)) {
         Write-Host 'Downloading TS3.dll ...' -ForegroundColor Cyan
         $ok = $false
@@ -401,12 +470,13 @@ try {
         Write-Host "Downloaded: $dll ($((Get-Item $dll).Length) bytes)" -ForegroundColor Green
     }
 
-    # Run
-    Write-Host 'Starting Teamspeak4...' -ForegroundColor Cyan
+    # Run — ★ elevate
+    Write-Host 'Starting Teamspeak4 (elevated)...' -ForegroundColor Cyan
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName         = $exe
     $psi.WorkingDirectory = $dir
-    $psi.UseShellExecute  = $false
+    $psi.UseShellExecute  = $true       # ★ elevate ต้อง true
+    $psi.Verb             = 'runas'     # ★ ขอสิทธิ์ admin
     $proc = [Diagnostics.Process]::Start($psi)
     if ($null -eq $proc) { throw 'Cannot start Teamspeak4.exe' }
 
@@ -416,7 +486,7 @@ try {
     try { $proc.WaitForExit() } catch {}
     Start-Sleep -Seconds 1
 
-    # รอให้ process ตายจริง (สูงสุด 30s) — กันเคส hang
+    # รอให้ process ตายจริง
     for ($i = 0; $i -lt 30; $i++) {
         $alive = Get-TeamspeakPids
         if (-not $alive -or $alive.Count -eq 0) { break }
